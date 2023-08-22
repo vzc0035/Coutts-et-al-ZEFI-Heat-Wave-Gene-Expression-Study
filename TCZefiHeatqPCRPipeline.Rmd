@@ -1,0 +1,1096 @@
+---
+title: "TC Zebra Finch Heat qPCR Pipeline"
+author: Tori Coutts
+date: August 21, 2023
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
+###Load necessary packages
+```{r}
+library(ggplot2)
+library(nlme)
+library(multcomp)
+library(emmeans)
+library(bestNormalize)
+library(lmtest)
+library(car)
+```
+###Upload files
+```{r}
+#Go through QC with Excel. For my experiment, I chose to get rid of replicates that were more than 1 standard deviation away from the mean. See AusProj_Lab_HSP90B1_IL1B_AbbyStats_1STDEV.csv to see the sheet I used for QC and evaluating the reference gene.
+field_hsp90b1_il1b=read.csv(file.choose())
+field_hspaa1=read.csv(file.choose())
+field_hsp60_aptx=read.csv(file.choose())
+lab_hsp90b1_il1b=read.csv(file.choose())
+lab_hspaa1=read.csv(file.choose())
+lab_hsp60_aptx=read.csv(file.choose())
+```
+#Test for assumptions
+```{r}
+#subset your data to easily access each gene individually
+EEF2_field=subset(field_hsp90b1_il1b,Target=="EEF2")
+GOI_field=subset(field_hsp90b1_il1b,Target=="HSP90B1" | Target=="IL1B")
+HSP90B1_field=subset(GOI_field,Target=="HSP90B1")
+IL1B_field=subset(GOI_field,Target=="IL1B")
+EEF2_HSP90AA1_field=subset(field_hspaa1,Target=="EEF2")
+HSP90AA1_field=subset(field_hspaa1,Target=="HSP90AA1")
+EEF2_HSP60_APTX_field=subset(field_hsp60_aptx,Target=="EEF2")
+GOI_HSP60_APTX_field=subset(field_hsp60_aptx,Target=="HSP60" | Target=="APTX")
+HSP60_field=subset(GOI_HSP60_APTX_field,Target=="HSP60")
+APTX_field=subset(GOI_HSP60_APTX_field,Target=="APTX")
+
+EEF2_lab=subset(lab_hsp90b1_il1b,Target=="EEF2")
+GOI_lab=subset(lab_hsp90b1_il1b,Target=="HSP90B1" | Target=="IL1B")
+HSP90B1_lab=subset(GOI_lab,Target=="HSP90B1")
+IL1B_lab=subset(GOI_lab,Target=="IL1B")
+EEF2_HSP90AA1_lab=subset(lab_hspaa1,Target=="EEF2")
+HSP90AA1_lab=subset(lab_hspaa1,Target=="HSP90AA1")
+EEF2_HSP60_APTX_lab=subset(lab_hsp60_aptx,Target=="EEF2")
+GOI_HSP60_APTX_lab=subset(lab_hsp60_aptx,Target=="HSP60" | Target=="APTX")
+HSP60_lab=subset(GOI_HSP60_APTX_lab,Target=="HSP60")
+APTX_lab=subset(GOI_HSP60_APTX_lab,Target=="APTX")
+
+#Statistical and visual test for heteroscedasticity
+#Field, plates with HSP90B1 and IL1B
+cn.test.field.hsp90b1.il1b=lme(Copy_Number~Sample,data=field_hsp90b1_il1b, na.action=na.omit,random=~1|Content)
+plot(field_hsp90b1_il1b$Copy_Number,residuals(cn.test.field.hsp90b1.il1b))
+abline(a=0,b=0)
+#EEF2
+eef2.cn.test.field.hsp90b1.il1b=lme(Copy_Number~Sample,data=EEF2_field, na.action=na.omit, random=~1|Content)
+#Residuals plot
+plot(EEF2_field$Copy_Number, residuals(eef2.cn.test.field.hsp90b1.il1b))
+abline(a=0,b=0)
+#Secondary Histogram to assess normality.
+hist(residuals(eef2.cn.test.field.hsp90b1.il1b))
+#HSP90B1
+hsp90b1.cn.test.field=lme(NormHSP90B1~Treatment,data=fielddata, na.action=na.omit, random=~1|BirdID)
+#Residuals plot
+plot(fielddata$NormHSP90B1[1:length(residuals(hsp90b1.cn.test.field))], residuals(hsp90b1.cn.test.field))
+abline(a=0,b=0)
+#Secondary Histogram to assess normality.
+hist(residuals(hsp90b1.cn.test.field))
+#IL1B
+il1b.cn.test.field=lme(NormIL1B~Treatment,data=fielddata, na.action=na.omit, random=~1|BirdID)
+#Residuals plot
+plot(fielddata$NormIL1B[1:length(residuals(il1b.cn.test.field))], residuals(il1b.cn.test.field))
+abline(a=0,b=0)
+#Secondary Histogram to assess normality.
+hist(residuals(il1b.cn.test.field))
+###All of these violate the assumption of homoscedasticity and linearity.
+
+#Field, plates with HSP90AA1
+cn.test.field.hsp90aa1=lme(Copy_Number~Sample,data=field_hspaa1, na.action=na.omit,random=~1|Content)
+plot(field_hspaa1$Copy_Number[1:length(residuals(cn.test.field.hsp90aa1))],residuals(cn.test.field.hsp90aa1))
+abline(a=0,b=0) ##this won't run for some reason (x and y lengths differ?)
+#EEF2
+eef2.cn.test.field.hsp90aa1=lme(Copy_Number~Sample,data=EEF2_HSP90AA1_field, na.action=na.omit, random=~1|Content)
+#Residuals plot
+plot(EEF2_HSP90AA1_field$Copy_Number, residuals(eef2.cn.test.field.hsp90aa1))
+abline(a=0,b=0)
+#Secondary Histogram to assess normality.
+hist(residuals(eef2.cn.test.field.hsp90aa1))
+#HSP90AA1
+hsp90aa1.cn.test.field=lme(NormHSP90AA1~Treatment,data=fielddata, na.action=na.omit, random=~1|BirdID)
+#Residuals plot
+plot(fielddata$NormHSP90AA1[1:length(residuals(hsp90aa1.cn.test.field))], residuals(hsp90aa1.cn.test.field))
+abline(a=0,b=0)
+#Secondary Histogram to assess normality.
+hist(residuals(hsp90aa1.cn.test.field))
+###Both of these violate the assumption of homoscedasticity and linearity.
+
+#Field, plates with HSP60 and APTX
+cn.test.field.hsp60.aptx=lme(Copy_Number~Sample,data=field_hsp60_aptx, na.action=na.omit,random=~1|Content)
+plot(field_hsp60_aptx$Copy_Number,residuals(cn.test.field.hsp60.aptx))
+abline(a=0,b=0)
+#EEF2
+eef2.cn.test.field.hsp60.aptx=lme(Copy_Number~Sample,data=EEF2_HSP60_APTX_field, na.action=na.omit, random=~1|Content)
+#Residuals plot
+plot(EEF2_HSP60_APTX_field$Copy_Number, residuals(eef2.cn.test.field.hsp60.aptx))
+abline(a=0,b=0)
+#Secondary Histogram to assess normality.
+hist(residuals(eef2.cn.test.field.hsp60.aptx))
+#HSP60
+hsp60.cn.test.field=lme(NormHSP60~Treatment,data=fielddata, na.action=na.omit, random=~1|BirdID)
+#Residuals plot
+plot(fielddata$NormHSP60[1:length(residuals(hsp60.cn.test.field))], residuals(hsp60.cn.test.field))
+abline(a=0,b=0)
+#Secondary Histogram to assess normality.
+hist(residuals(hsp60.cn.test.field))
+#APTX
+aptx.cn.test.field=lme(NormAPTX~Treatment,data=fielddata, na.action=na.omit, random=~1|BirdID)
+#Residuals plot
+plot(fielddata$NormAPTX[1:length(residuals(aptx.cn.test.field))], residuals(aptx.cn.test.field))
+abline(a=0,b=0)
+#Secondary Histogram to assess normality.
+hist(residuals(aptx.cn.test.field))
+###The data violate the assumption of homoscedasticity.
+
+#Lab, plates with HSP90B1 and IL1B
+cn.test.lab.hsp90b1.il1b=lme(Copy_Number~Sample,data=lab_hsp90b1_il1b, na.action=na.omit,random=~1|Content)
+plot(lab_hsp90b1_il1b$Copy_Number,residuals(cn.test.lab.hsp90b1.il1b))
+abline(a=0,b=0)
+#EEF2
+eef2.cn.test.lab.hsp90b1.il1b=lme(Copy_Number~Sample,data=EEF2_lab, na.action=na.omit, random=~1|Content)
+#Residuals plot
+plot(EEF2_lab$Copy_Number, residuals(eef2.cn.test.lab.hsp90b1.il1b))
+abline(a=0,b=0)
+#Secondary Histogram to assess normality.
+hist(residuals(eef2.cn.test.lab.hsp90b1.il1b))
+#HSP90B1
+hsp90b1.cn.test.lab=lme(NormHSP90B1~Treatment,data=labdata, na.action=na.omit, random=~1|BirdID)
+#Residuals plot
+plot(labdata$NormHSP90B1[1:length(residuals(hsp90b1.cn.test.lab))], residuals(hsp90b1.cn.test.lab))
+abline(a=0,b=0)
+#Secondary Histogram to assess normality.
+hist(residuals(hsp90b1.cn.test.lab))
+#IL1B
+il1b.cn.test.lab=lme(NormIL1B~Treatment,data=labdata, na.action=na.omit, random=~1|BirdID)
+#Residuals plot
+plot(labdata$NormIL1B[1:length(residuals(il1b.cn.test.lab))], residuals(il1b.cn.test.lab))
+abline(a=0,b=0)
+#Secondary Histogram to assess normality.
+hist(residuals(il1b.cn.test.lab))
+###These data violate the assumption of heteroscedasticity and linearity.
+
+#Lab, plates with HSP90AA1
+cn.test.lab.hsp90aa1=lme(Copy_Number~Sample,data=lab_hspaa1, na.action=na.omit,random=~1|Content)
+plot(lab_hspaa1$Copy_Number,residuals(cn.test.lab.hsp90aa1))
+abline(a=0,b=0)
+#EEF2
+eef2.cn.test.lab.hsp90aa1=lme(Copy_Number~Sample,data=EEF2_HSP90AA1_lab, na.action=na.omit, random=~1|Content)
+#Residuals plot
+plot(EEF2_HSP90AA1_lab$Copy_Number, residuals(eef2.cn.test.lab.hsp90aa1))
+abline(a=0,b=0)
+#Secondary Histogram to assess normality.
+hist(residuals(eef2.cn.test.lab.hsp90aa1))
+#HSP90AA1
+hsp90aa1.cn.test.lab=lme(NormHSP90AA1~Treatment,data=labdata, na.action=na.omit, random=~1|BirdID)
+#Residuals plot
+plot(labdata$NormHSP90AA1[1:length(residuals(hsp90aa1.cn.test.lab))], residuals(hsp90aa1.cn.test.lab))
+abline(a=0,b=0)
+#Secondary Histogram to assess normality.
+hist(residuals(hsp90aa1.cn.test.lab))
+###HSP90AA1 lab samples violate: homoscedasticity and normality
+
+#Lab, plates with HSP60 and APTX
+cn.test.lab.hsp60.aptx=lme(Copy_Number~Sample,data=lab_hsp60_aptx, na.action=na.omit,random=~1|Content)
+plot(lab_hsp60_aptx$Copy_Number,residuals(cn.test.lab.hsp60.aptx))
+abline(a=0,b=0)
+#EEF2
+eef2.cn.test.lab.hsp60.aptx=lme(Copy_Number~Sample,data=EEF2_HSP60_APTX_lab, na.action=na.omit, random=~1|Content)
+#Residuals plot
+plot(EEF2_HSP60_APTX_lab$Copy_Number, residuals(eef2.cn.test.lab.hsp60.aptx))
+abline(a=0,b=0)
+#Secondary Histogram to assess normality.
+hist(residuals(eef2.cn.test.lab.hsp60.aptx))
+#HSP60
+hsp60.cn.test.lab=lme(NormHSP60~Treatment,data=labdata, na.action=na.omit, random=~1|BirdID)
+#Residuals plot
+plot(labdata$NormHSP60, residuals(hsp60.cn.test.lab))
+abline(a=0,b=0)
+#Secondary Histogram to assess normality.
+hist(residuals(hsp60.cn.test.lab))
+###HSP60 lab samples violate: homoscedasticity, normality
+#APTX
+aptx.cn.test.lab=lme(NormAPTX~Treatment,data=labdata, na.action=na.omit, random=~1|BirdID)
+#Residuals plot
+plot(labdata$NormAPTX, residuals(aptx.cn.test.lab))
+abline(a=0,b=0)
+#Secondary Histogram to assess normality.
+hist(residuals(aptx.cn.test.lab))
+###APTX lab samples violate: homoscedasticity, normality
+
+##Identification of possible transformation models by BestNormalize
+#analysis of EEF2 alone
+bestNormalize(EEF2_field$Copy_Number)
+#Yeo-Johnson
+bestNormalize(EEF2_HSP90AA1_field$Copy_Number)
+#standard asinh(x)
+bestNormalize(EEF2_HSP60_APTX_field$Copy_Number)
+#Box Cox
+bestNormalize(EEF2_lab$Copy_Number)
+#orderNorm
+bestNormalize(EEF2_HSP90AA1_lab$Copy_Number)
+#asinh(x)
+bestNormalize(EEF2_HSP60_APTX_lab$Copy_Number)
+#center_scale(x)
+```
+#Validate housekeeping gene
+```{r}
+#is the copy number of the reference gene significantly different between treatment groups?
+##Ordered Quantile transformation of all data
+orq_field=yeojohnson(EEF2_field$Copy_Number)
+EEF2_field=cbind(EEF2_field, orq_field=orq_field$x.t)
+model.eef2.field=lme(orq_field~Sample, random =  ~1|Plate, data=EEF2_field,na.action=na.exclude)
+summary(model.eef2.field)
+## (Intercept)	0.06175179	0.5616276	108	0.1099515	0.9127
+## SampleHot	0.05526891	0.1634705	108	0.3380972	0.7359
+#for the field plates that ran EEF2, HSP90B1, and IL1B, EEF2 is not significantly different between treatment groups (p=0.7359).
+orq_hsp90aa1_field=asinh(EEF2_HSP90AA1_field$Copy_Number)
+EEF2_HSP90AA1_field=cbind(EEF2_HSP90AA1_field, orq_hsp90aa1_field=orq_hsp90aa1_field)
+model.eef2.hsp90aa1.field=lme(orq_hsp90aa1_field~Sample, random=~1|Plate, data=EEF2_HSP90AA1_field,na.action=na.exclude)
+summary(model.eef2.hsp90aa1.field)
+##	(Intercept)	7.615080	0.6788774	93	11.217166	0.00
+## SampleHot	0.417179	0.2945581	93	1.416289	0.16
+#for the field plates that ran EEF2 and HSP90AA1, EEF2 is not different between treatment groups (p=0.16).
+orq_hsp60_aptx_field=boxcox(EEF2_HSP60_APTX_field$Copy_Number)
+EEF2_HSP60_APTX_field=cbind(EEF2_HSP60_APTX_field, orq_hsp60_aptx_field=orq_hsp60_aptx_field$x.t)
+model.eef2.hsp60.aptx.field=lme(orq_hsp60_aptx_field~Sample, random=~1|Plate, data=EEF2_HSP60_APTX_field,na.action=na.exclude)
+summary(model.eef2.hsp60.aptx.field)
+## (Intercept)	0.01807877	0.5103059	104	0.0354273	0.9718
+## SampleHot	0.17204656	0.1714764	104	1.0033249	0.3180
+#for the field plates that ran EEF2, HSP60, and APTX, EEF2 is not significantly different between treatment groups (p=0.3180).
+
+orq_lab=orderNorm(EEF2_lab$Copy_Number)
+EEF2_lab=cbind(EEF2_lab, orq_lab=orq_lab$x.t)
+model.eef2.lab=lme(orq_lab~Sample, random =  ~1|Plate, data=EEF2_lab,na.action=na.exclude)
+summary(model.eef2.lab)
+## (Intercept)	-0.1073177	0.1689135	87	-0.6353409	0.5269
+## Sample40C	0.1763299	0.2108352	87	0.8363400	0.4053
+#for the lab plates that ran EEF2, HSP90B1, and IL1B, EEF2 is not significantly different between treatment groups (p=0.4053).
+orq_hsp90aa1_lab=asinh(EEF2_HSP90AA1_lab$Copy_Number)
+EEF2_HSP90AA1_lab=cbind(EEF2_HSP90AA1_lab, orq_hsp90aa1_lab=orq_hsp90aa1_lab)
+model.eef2.hsp90aa1.lab=lme(orq_hsp90aa1_lab~Sample, random=~1|Plate, data=EEF2_HSP90AA1_lab,na.action=na.exclude)
+summary(model.eef2.hsp90aa1.lab)
+## (Intercept)	8.991557	0.2153371	64	41.75573	0.000
+## Sample40C	0.036842	0.2979355	64	0.12366	0.902
+#for the lab plates that ran EEF2 and HSP90AA1, EEF2 is not significantly different between treatment groups (p=0.902).
+orq_hsp60_aptx_lab=center_scale(EEF2_HSP60_APTX_lab$Copy_Number)
+EEF2_HSP60_APTX_lab=cbind(EEF2_HSP60_APTX_lab, orq_hsp60_aptx_lab=orq_hsp60_aptx_lab$x.t)
+model.eef2.hsp60.aptx.lab=lme(orq_hsp60_aptx_lab~Sample, random=~1|Plate, data=EEF2_HSP60_APTX_lab,na.action=na.exclude)
+summary(model.eef2.hsp60.aptx.lab)
+## (Intercept)	-0.09568152	0.1688140	90	-0.5667868	0.5723
+## Sample40_deg	0.14895604	0.2078056	90	0.7168048	0.4754
+#for the lab plates that ran EEF2, HSP60, and APTX, EEF2 is not significantly different between treatment groups (p=0.4754).
+
+#plot the EEF2 data for visualization of potential differences between treatment groups
+EEF2.plot.field= ggplot(EEF2_field, aes(x=as.factor(Sample), y=orq_field)) + 
+  #this line creates a violin plot, not trimming the shape to hide data density on ends, and setting the width of the violins     to line up with the groups on the x axis.  
+  geom_violin(trim=F, scale="width") +
+  #A boxplot is overlayed on the violin plot to show the mean and quartiles of the data, and all dataset outliers are highlighted in red.
+  geom_boxplot(width=0.1, outlier.color = "red") +
+  #the data points at each life stage are then placed on top of the boxplots to show the data distribution
+  geom_point() +
+  #change the y-axis to scientific notation 
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  #Rename the x axis to display the developmental stages in "mid, early, and late" rather than numberical stages
+  scale_x_discrete(name ="Treatment", 
+                   labels=c("Cool", "Hot")) +
+  #change the y axis title to remove the underscore in coded dataframe
+  ylab("Copy Number ORQ Transformed") +
+  #bold the text on the axis titles
+  theme(axis.title = element_text(face="bold", size=16)) +
+  theme(axis.text = element_text(face="bold")) +
+  theme(axis.text = element_text(size=14)) +
+  theme(plot.title = element_text(face="bold", size=16)) +
+  #remove legend from the plot
+  theme(legend.position="none") +
+  #add a title to the plot 
+  ggtitle("EEF2 Valid Ref Gene (ORQ)")
+ggsave(EEF2.plot.field, file="EEF2.norm.trans.field.png", width=12, height=10, dpi=300)
+EEF2.plot.field
+#For the plates that ran EEF2, HSP90B1, and IL1B, EEF2 does not look different between treatments. Normalize data to EEF2.
+EEF2.hsp90aa1.plot.field= ggplot(EEF2_HSP90AA1_field, aes(x=as.factor(Sample), y=orq_hsp90aa1_field)) + 
+  #this line creates a violin plot, not trimming the shape to hide data density on ends, and setting the width of the violins     to line up with the groups on the x axis.  
+  geom_violin(trim=F, scale="width") +
+  #A boxplot is overlayed on the violin plot to show the mean and quartiles of the data, and all dataset outlies are highlighted in red.
+  geom_boxplot(width=0.1, outlier.color = "red") +
+  #the data points at each life stage are then placed on top of the boxplots to show the data distribution
+  geom_point() +
+  #change the y-axis to scientific notation 
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  #Rename the x axis to display the developmental stages in "mid, early, and late" rather than numberical stages
+  scale_x_discrete(name ="Treatment", 
+                   labels=c("Cool", "Hot")) +
+  #change the y axis title to remove the underscore in coded dataframe
+  ylab("Copy Number ORQ Transformed") +
+  #bold the text on the axis titles
+  theme(axis.title = element_text(face="bold", size=16)) +
+  theme(axis.text = element_text(face="bold")) +
+  theme(axis.text = element_text(size=14)) +
+  theme(plot.title = element_text(face="bold", size=16)) +
+  #remove legend from the plot
+  theme(legend.position="none") +
+  #add a title to the plot 
+  ggtitle("EEF2 Valid Ref Gene (ORQ)")
+ggsave(EEF2.hsp90aa1.plot.field, file="EEF2.norm.trans.hsp90aa1.field.png", width=12, height=10, dpi=300)
+EEF2.hsp90aa1.plot.field
+#For the plates that ran EEF2 and HSP90AA1, EEF2 does not look different between treatments. Normalize data to EEF2.
+EEF2.hsp60.aptx.plot.field= ggplot(EEF2_HSP60_APTX_field, aes(x=as.factor(Sample), y=orq_hsp60_aptx_field)) + 
+  #this line creates a violin plot, not trimming the shape to hide data density on ends, and setting the width of the violins     to line up with the groups on the x axis.  
+  geom_violin(trim=F, scale="width") +
+  #A boxplot is overlayed on the violin plot to show the mean and quartiles of the data, and all dataset outlies are highlighted in red.
+  geom_boxplot(width=0.1, outlier.color = "red") +
+  #the data points at each life stage are then placed on top of the boxplots to show the data distribution
+  geom_point() +
+  #change the y-axis to scientific notation 
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  #Rename the x axis to display the developmental stages in "mid, early, and late" rather than numberical stages
+  scale_x_discrete(name ="Treatment", 
+                   labels=c("Cool", "Hot")) +
+  #change the y axis title to remove the underscore in coded dataframe
+  ylab("Copy Number ORQ Transformed") +
+  #bold the text on the axis titles
+  theme(axis.title = element_text(face="bold", size=16)) +
+  theme(axis.text = element_text(face="bold")) +
+  theme(axis.text = element_text(size=14)) +
+  theme(plot.title = element_text(face="bold", size=16)) +
+  #remove legend from the plot
+  theme(legend.position="none") +
+  #add a title to the plot 
+  ggtitle("EEF2 Valid Ref Gene (ORQ)")
+ggsave(EEF2.hsp60.aptx.plot.field, file="EEF2.norm.trans.hsp60.aptx.field.png", width=12, height=10, dpi=300)
+EEF2.hsp60.aptx.plot.field
+#For the plates that ran EEF2, HSP60, and APTX, EEF2 does not look different between treatments. Normalize data to EEF2.
+
+EEF2.plot.lab= ggplot(EEF2_lab, aes(x=as.factor(Sample), y=orq_lab)) + 
+  #this line creates a violin plot, not trimming the shape to hide data density on ends, and setting the width of the violins     to line up with the groups on the x axis.  
+  geom_violin(trim=F, scale="width") +
+  #A boxplot is overlayed on the violin plot to show the mean and quartiles of the data, and all dataset outlies are highlighted in red.
+  geom_boxplot(width=0.1, outlier.color = "red") +
+  #the data points at each life stage are then placed on top of the boxplots to show the data distribution
+  geom_point() +
+  #change the y-axis to scientific notation 
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  #Rename the x axis to display the developmental stages in "mid, early, and late" rather than numberical stages
+  scale_x_discrete(name ="Treatment", 
+                   labels=c("Low", "High")) +
+  #change the y axis title to remove the underscore in coded dataframe
+  ylab("Copy Number ORQ Transformed") +
+  #bold the text on the axis titles
+  theme(axis.title = element_text(face="bold", size=16)) +
+  theme(axis.text = element_text(face="bold")) +
+  theme(axis.text = element_text(size=14)) +
+  theme(plot.title = element_text(face="bold", size=16)) +
+  #remove legend from the plot
+  theme(legend.position="none") +
+  #add a title to the plot 
+  ggtitle("EEF2 Valid Ref Gene (ORQ)")
+ggsave(EEF2.plot.lab, file="EEF2.norm.trans.lab.png", width=12, height=10, dpi=300)
+EEF2.plot.lab
+#For the plates that ran EEF2, HSP90B1, and IL1B, EEF2 does not look different between treatments. Normalize data to EEF2.
+EEF2.hsp90aa1.plot.lab= ggplot(EEF2_HSP90AA1_lab, aes(x=as.factor(Sample), y=orq_hsp90aa1_lab)) + 
+  #this line creates a violin plot, not trimming the shape to hide data density on ends, and setting the width of the violins     to line up with the groups on the x axis.  
+  geom_violin(trim=F, scale="width") +
+  #A boxplot is overlayed on the violin plot to show the mean and quartiles of the data, and all dataset outlies are highlighted in red.
+  geom_boxplot(width=0.1, outlier.color = "red") +
+  #the data points at each life stage are then placed on top of the boxplots to show the data distribution
+  geom_point() +
+  #change the y-axis to scientific notation 
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  #Rename the x axis to display the developmental stages in "mid, early, and late" rather than numberical stages
+  scale_x_discrete(name ="Treatment", 
+                   labels=c("Low", "High")) +
+  #change the y axis title to remove the underscore in coded dataframe
+  ylab("Copy Number ORQ Transformed") +
+  #bold the text on the axis titles
+  theme(axis.title = element_text(face="bold", size=16)) +
+  theme(axis.text = element_text(face="bold")) +
+  theme(axis.text = element_text(size=14)) +
+  theme(plot.title = element_text(face="bold", size=16)) +
+  #remove legend from the plot
+  theme(legend.position="none") +
+  #add a title to the plot 
+  ggtitle("EEF2 Valid Ref Gene (ORQ)")
+ggsave(EEF2.hsp90aa1.plot.lab, file="EEF2.norm.trans.hsp90aa1.lab.png", width=12, height=10, dpi=300)
+EEF2.hsp90aa1.plot.lab
+#For the plates that ran EEF2 and HSP90AA1, EEF2 does not look different between treatments. Normalize data to EEF2.
+EEF2.hsp60.aptx.plot.lab= ggplot(EEF2_HSP60_APTX_lab, aes(x=as.factor(Sample), y=orq_hsp60_aptx_lab)) + 
+  #this line creates a violin plot, not trimming the shape to hide data density on ends, and setting the width of the violins     to line up with the groups on the x axis.  
+  geom_violin(trim=F, scale="width") +
+  #A boxplot is overlayed on the violin plot to show the mean and quartiles of the data, and all dataset outlies are highlighted in red.
+  geom_boxplot(width=0.1, outlier.color = "red") +
+  #the data points at each life stage are then placed on top of the boxplots to show the data distribution
+  geom_point() +
+  #change the y-axis to scientific notation 
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  #Rename the x axis to display the developmental stages in "mid, early, and late" rather than numberical stages
+  scale_x_discrete(name ="Treatment", 
+                   labels=c("Low", "High")) +
+  #change the y axis title to remove the underscore in coded dataframe
+  ylab("Copy Number ORQ Transformed") +
+  #bold the text on the axis titles
+  theme(axis.title = element_text(face="bold", size=16)) +
+  theme(axis.text = element_text(face="bold")) +
+  theme(axis.text = element_text(size=14)) +
+  theme(plot.title = element_text(face="bold", size=16)) +
+  #remove legend from the plot
+  theme(legend.position="none") +
+  #add a title to the plot 
+  ggtitle("EEF2 Valid Ref Gene (ORQ)")
+ggsave(EEF2.hsp60.aptx.plot.lab, file="EEF2.norm.trans.hsp60.aptx.lab.png", width=12, height=10, dpi=300)
+EEF2.hsp60.aptx.plot.lab
+#For the plates that ran EEF2, HSP60, and APTX, EEF2 does not look different between treatments. Normalize data to EEF2.
+```
+###Statistical Analysis
+```{r}
+#upload normalized data
+fielddata=read.csv(file.choose())
+labdata=read.csv(file.choose())
+
+#subset data
+GOI_field_norm=subset(fielddata,Target=="HSP90B1" | Target=="IL1B" | Target=="HSP90AA1" | Target=="HSP60" | Target=="APTX")
+HSP90B1_field_norm=subset(GOI_field_norm,Target=="HSP90B1")
+IL1B_field_norm=subset(GOI_field_norm,Target=="IL1B")
+HSP90AA1_field_norm=subset(GOI_field_norm,Target=="HSP90AA1")
+HSP60_field_norm=subset(GOI_field_norm,Target=="HSP60")
+APTX_field_norm=subset(GOI_field_norm,Target=="APTX")
+
+GOI_lab_norm=subset(labdata,Target=="HSP90B1" | Target=="IL1B" | Target=="HSP90AA1" | Target=="HSP60" | Target=="APTX")
+HSP90B1_lab_norm=subset(GOI_lab_norm,Target=="HSP90B1")
+IL1B_lab_norm=subset(GOI_lab_norm,Target=="IL1B")
+HSP90AA1_lab_norm=subset(GOI_lab_norm,Target=="HSP90AA1")
+HSP60_lab_norm=subset(GOI_lab_norm,Target=="HSP60")
+APTX_lab_norm=subset(GOI_lab_norm,Target=="APTX")
+
+#figure out how to transform data
+bestNormalize(HSP90B1_field_norm$NormCopyNumber) #says Box Cox, but orderNorm graphically looks better, so did orderNorm
+bestNormalize(IL1B_field_norm$NormCopyNumber) #orderNorm
+bestNormalize(HSP90AA1_field_norm$NormCopyNumber) #orderNorm
+bestNormalize(HSP60_field_norm$NormCopyNumber) #orderNorm
+bestNormalize(APTX_field_norm$NormCopyNumber) #says Box Cox, but orderNorm graphically looks better, so did orderNorm
+
+bestNormalize(HSP90B1_lab_norm$NormCopyNumber) #orderNorm
+bestNormalize(IL1B_lab_norm$NormCopyNumber) #Box Cox
+bestNormalize(HSP90AA1_lab_norm$NormCopyNumber) #orderNorm
+bestNormalize(HSP60_lab_norm$NormCopyNumber) #log_10(x+0)
+bestNormalize(APTX_lab_norm$NormCopyNumber) #asinh(x)
+
+#Obtained transformed values and bind to original data set
+HSP90B1_field_norm_trans=orderNorm(HSP90B1_field_norm$NormCopyNumber)
+HSP90B1_field_norm=cbind(HSP90B1_field_norm, HSP90B1_field_norm_trans=HSP90B1_field_norm_trans$x.t)
+
+IL1B_field_norm_trans=orderNorm(IL1B_field_norm$NormCopyNumber)
+IL1B_field_norm=cbind(IL1B_field_norm,IL1B_field_norm_trans=IL1B_field_norm_trans$x.t)
+
+HSP90AA1_field_norm_trans=orderNorm(HSP90AA1_field_norm$NormCopyNumber)
+HSP90AA1_field_norm=cbind(HSP90AA1_field_norm,HSP90AA1_field_norm_trans=HSP90AA1_field_norm_trans$x.t)
+
+HSP60_field_norm_trans=orderNorm(HSP60_field_norm$NormCopyNumber)
+HSP60_field_norm=cbind(HSP60_field_norm,HSP60_field_norm_trans=HSP60_field_norm_trans$x.t)
+
+APTX_field_norm_trans=orderNorm(APTX_field_norm$NormCopyNumber)
+APTX_field_norm=cbind(APTX_field_norm,APTX_field_norm_trans=APTX_field_norm_trans$x.t)
+
+HSP90B1_lab_norm_trans=orderNorm(HSP90B1_lab_norm$NormCopyNumber)
+HSP90B1_lab_norm=cbind(HSP90B1_lab_norm, HSP90B1_lab_norm_trans=HSP90B1_lab_norm_trans$x.t)
+
+IL1B_lab_norm_trans=boxcox(IL1B_lab_norm$NormCopyNumber)
+IL1B_lab_norm=cbind(IL1B_lab_norm, IL1B_lab_norm_trans=IL1B_lab_norm_trans$x.t)
+
+HSP90AA1_lab_norm_trans=orderNorm(HSP90AA1_lab_norm$NormCopyNumber)
+HSP90AA1_lab_norm=cbind(HSP90AA1_lab_norm, HSP90AA1_lab_norm_trans=HSP90AA1_lab_norm_trans$x.t)
+
+HSP60_lab_norm_trans=log10(HSP60_lab_norm$NormCopyNumber)
+HSP60_lab_norm=cbind(HSP60_lab_norm, HSP60_lab_norm_trans)
+
+APTX_lab_norm_trans=asinh(APTX_lab_norm$NormCopyNumber)
+APTX_lab_norm=cbind(APTX_lab_norm, APTX_lab_norm_trans)
+
+#Transformed Data Evaluation
+#HSP90B1, field
+orq.tr.hsp90b1.field=(lme(HSP90B1_field_norm_trans~Treatment,random=~1|BirdID, data=HSP90B1_field_norm,na.action=na.exclude))
+plot(HSP90B1_field_norm$HSP90B1_field_norm_trans, residuals(orq.tr.hsp90b1.field))
+abline(a=0,b=0) #still heteroscedastic, but linear
+hist(residuals(orq.tr.hsp90b1.field)) #normally distributed
+
+#IL1B, field
+orq.tr.il1b.field=(lme(IL1B_field_norm_trans~Treatment,random=~1|BirdID, data=IL1B_field_norm,na.action=na.exclude))
+plot(IL1B_field_norm$IL1B_field_norm_trans, residuals(orq.tr.il1b.field))
+abline(a=0,b=0) #still heteroscedastic, but linear
+hist(residuals(orq.tr.il1b.field)) #normally distributed
+
+#HSP90AA1, field
+orq.tr.hsp90aa1.field=(lme(HSP90AA1_field_norm_trans~Treatment,random=~1|BirdID, data=HSP90AA1_field_norm,na.action=na.exclude))
+plot(HSP90AA1_field_norm$HSP90AA1_field_norm_trans, residuals(orq.tr.hsp90aa1.field))
+abline(a=0,b=0) #still heteroscedastic, but linear
+hist(residuals(orq.tr.hsp90aa1.field)) #normally distributed
+
+#HSP60, field
+orq.tr.hsp60.field=(lme(HSP60_field_norm_trans~Treatment,random=~1|BirdID, data=HSP60_field_norm,na.action=na.exclude))
+plot(HSP60_field_norm$HSP60_field_norm_trans, residuals(orq.tr.hsp60.field))
+abline(a=0,b=0) #still heteroscedastic, NOT linear
+hist(residuals(orq.tr.hsp60.field)) #NOT normally distributed
+#This CANNOT be fixed with orderNorm, log, or sqrt+0.5 transformation
+
+#APTX, field
+orq.tr.aptx.field=(lme(APTX_field_norm_trans~Treatment,random=~1|BirdID, data=APTX_field_norm,na.action=na.exclude))
+plot(APTX_field_norm$APTX_field_norm_trans, residuals(orq.tr.aptx.field))
+abline(a=0,b=0) #still heteroscedastic, but linear
+hist(residuals(orq.tr.aptx.field)) #normally distributed
+
+#HSP90B1, lab
+orq.tr.hsp90b1.lab=(lme(HSP90B1_lab_norm_trans~Treatment,random=~1|BirdID, data=HSP90B1_lab_norm,na.action=na.exclude))
+plot(HSP90B1_lab_norm$HSP90B1_lab_norm_trans, residuals(orq.tr.hsp90b1.lab))
+abline(a=0,b=0) #still heteroscedastic, but linear
+hist(residuals(orq.tr.hsp90b1.lab)) #normally distributed
+
+#IL1B, lab
+orq.tr.il1b.lab=(lme(IL1B_lab_norm_trans~Treatment,random=~1|BirdID, data=IL1B_lab_norm,na.action=na.exclude))
+plot(IL1B_lab_norm$IL1B_lab_norm_trans, residuals(orq.tr.il1b.lab))
+abline(a=0,b=0) #still heteroscedastic, but linear
+hist(residuals(orq.tr.il1b.lab)) #normally distributed
+
+#HSP90AA1, lab
+orq.tr.hsp90aa1.lab=(lme(HSP90AA1_lab_norm_trans~Treatment,random=~1|BirdID, data=HSP90AA1_lab_norm,na.action=na.exclude))
+plot(HSP90AA1_lab_norm$HSP90AA1_lab_norm_trans, residuals(orq.tr.hsp90aa1.lab))
+abline(a=0,b=0) #still heteroscedastic, but linear
+hist(residuals(orq.tr.hsp90aa1.lab)) #normally distributed
+
+#HSP60, lab
+orq.tr.hsp60.lab=(lme(HSP60_lab_norm_trans~Treatment,random=~1|BirdID, data=HSP60_lab_norm,na.action=na.exclude))
+plot(HSP60_lab_norm$HSP60_lab_norm_trans, residuals(orq.tr.hsp60.lab))
+abline(a=0,b=0) #still heteroscedastic, but linear
+hist(residuals(orq.tr.hsp60.lab)) #normally distributed
+
+#APTX, lab
+orq.tr.aptx.lab=(lme(APTX_lab_norm_trans~Treatment,random=~1|BirdID, data=APTX_lab_norm,na.action=na.exclude))
+plot(APTX_lab_norm$APTX_lab_norm_trans, residuals(orq.tr.aptx.lab))
+abline(a=0,b=0) #still heteroscedastic, but linear
+hist(residuals(orq.tr.aptx.lab)) #normally distributed
+```
+####Field samples, categorical Cool and Hot
+```{r}
+#HSP90B1
+model.hsp90b1.field=lme(HSP90B1_field_norm_trans~Treatment+Sex+Treatment:Sex,data=HSP90B1_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.hsp90b1.field)
+##TRANSFORMED:
+## (Intercept)	-0.3281845	0.3420867	34	-0.9593606	0.3442
+## TreatmentHot	0.6750452	0.5222840	23	1.2924870	0.2090
+## SexM	0.5636588	0.4712033	23	1.1962115	0.2438
+## TreatmentHot:SexM	-1.1995231	0.7806363	23	-1.5365966	0.1380
+Anova(model.hsp90b1.field)
+## TRANSFORMED:
+## Treatment     0.1355  1     0.7128
+## Sex           0.1216  1     0.7274
+## Treatment:Sex 2.5268  1     0.1119
+#Should the interaction term be included?
+model.hsp90b1.field.noint=lme(HSP90B1_field_norm_trans~Treatment+Sex,data=HSP90B1_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.hsp90b1.field.noint)
+anova(model.hsp90b1.field,model.hsp90b1.field.noint)
+##TRANSFORMED:
+## model.hsp90b1.field	1	6	127.6292	140.2945	-57.81462			
+## model.hsp90b1.field.noint	2	5	128.0431	138.5975	-59.02157	1 vs 2	2.413895	0.1203
+#Interaction term should not be included in the final model
+#Should Sex be included?
+model.hsp90b1.field.trt=lme(HSP90B1_field_norm_trans~Treatment,data=HSP90B1_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.hsp90b1.field.trt)
+anova(model.hsp90b1.field.noint,model.hsp90b1.field.trt)
+##TRANSFORMED:
+## model.hsp90b1.field.noint	1	5	128.0431	138.5975	-59.02157			
+## model.hsp90b1.field.trt	2	4	126.1542	134.5977	-59.07709	1 vs 2	0.1110384	0.739
+#FINAL MODEL: Treatment only
+model.hsp90b1.field.trt=lme(HSP90B1_field_norm_trans~Treatment,data=HSP90B1_field_norm,random=~1|BirdID,na.action=na.exclude)
+summary(model.hsp90b1.field.trt)
+##TRANSFORMED:
+## (Intercept)	-0.03062062	0.2477038	34	-0.1236179	0.9023
+## TreatmentHot	0.12143309	0.4059131	25	0.2991603	0.7673
+
+#IL1B
+model.il1b.field=lme(IL1B_field_norm_trans~Treatment+Sex+Sex:Treatment,data=IL1B_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.il1b.field)
+##TRANSFORMED:
+## (Intercept)	0.0603281	0.2828887	54	0.2132574	0.8319
+## TreatmentHot	-0.2740666	0.4545859	30	-0.6028929	0.5511
+## SexM	0.2579061	0.4107555	30	0.6278822	0.5348
+## TreatmentHot:SexM	-0.4038249	0.6646058	30	-0.6076157	0.5480
+Anova(model.il1b.field)
+##TRANSFORMED:
+## Treatment     2.0421  1     0.1530
+## Sex           0.1079  1     0.7425
+## Treatment:Sex 0.3868  1     0.5340
+#Should the interaction be included?
+model.il1b.field.noint=lme(IL1B_field_norm_trans~Treatment+Sex,data=IL1B_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.il1b.field.noint)
+anova(model.il1b.field,model.il1b.field.noint)
+##TRANSFORMED:
+## model.il1b.field	1	6	171.6571	186.5212	-79.82857			
+## model.il1b.field.noint	2	5	170.0417	182.4284	-80.02085	1 vs 2	0.384554	0.5352
+#Interaction term should be removed
+#Should Sex be included in the model?
+model.il1b.field.trt=lme(IL1B_field_norm_trans~Treatment,data=IL1B_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.il1b.field.trt)
+anova(model.il1b.field.noint,model.il1b.field.trt)
+##TRANSFORMED:
+## model.il1b.field.noint	1	5	170.0417	182.4284	-80.02085			
+## model.il1b.field.trt	2	4	168.1482	178.0576	-80.07412	1 vs 2	0.1065513	0.7441
+#FINAL model: just Treatment
+model.il1b.field.trt=lme(IL1B_field_norm_trans~Treatment,data=IL1B_field_norm,random=~1|BirdID,na.action=na.exclude)
+summary(model.il1b.field.trt)
+##TRANSFORMED:
+## (Intercept)	0.1828528	0.2080315	54	0.8789667	0.3833
+## TreatmentHot	-0.4645533	0.3363342	32	-1.3812254	0.1768
+
+#HSP90AA1
+model.hsp90aa1.field=lme(HSP90AA1_field_norm_trans~Treatment+Sex+Treatment:Sex,data=HSP90AA1_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.hsp90aa1.field)
+##TRANSFORMED:
+## (Intercept)	0.4330114	0.2599234	52	1.6659192	0.1017
+## TreatmentHot	-0.5333388	0.4103678	34	-1.2996606	0.2025
+## SexM	-0.3503730	0.3754476	34	-0.9332141	0.3573
+## TreatmentHot:SexM	-0.1956425	0.5972163	34	-0.3275907	0.7452
+Anova(model.hsp90aa1.field)
+##TRANSFORMED:
+## Treatment     4.6093  1     0.0318 *
+## Sex           2.2455  1     0.1340  
+## Treatment:Sex 0.1123  1     0.7375  
+#Should the interaction term be included?
+model.hsp90aa1.field.noint=lme(HSP90AA1_field_norm_trans~Treatment+Sex,data=HSP90AA1_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.hsp90aa1.field.noint)
+anova(model.hsp90aa1.field,model.hsp90aa1.field.noint)
+##TRANSFORMED:
+## model.hsp90aa1.field	1	6	153.4686	168.4675	-70.73431			
+## model.hsp90aa1.field.noint	2	5	151.5808	164.0798	-70.79039	1 vs 2	0.1121737	0.7377
+#Interaction term should be removed
+#Should Sex stay in the model?
+model.hsp90aa1.field.trt=lme(HSP90AA1_field_norm_trans~Treatment,data=HSP90AA1_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.hsp90aa1.field.trt)
+anova(model.hsp90aa1.field.noint,model.hsp90aa1.field.trt)
+##TRANSFORMED:
+## model.hsp90aa1.field.noint	1	5	151.5808	164.0798	-70.79039			
+## model.hsp90aa1.field.trt	2	4	151.7490	161.7482	-71.87447	1 vs 2	2.168157	0.1409
+#FINAL model (transformed): just Treatment
+model.hsp90aa1.field.noint=lme(HSP90AA1_field_norm_trans~Treatment,data=HSP90AA1_field_norm,random=~1|BirdID,na.action=na.exclude)
+summary(model.hsp90aa1.field.noint)
+##TRANSFORMED:
+## (Intercept)	0.2650180	0.1943755	52	1.363434	0.1786
+## TreatmentHot	-0.6203076	0.3089998	36	-2.007469	0.0523
+
+#HSP60
+model.hsp60.field=lme(HSP60_field_norm_trans~Treatment+Sex+Treatment:Sex,data=HSP60_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.hsp60.field)
+##TRANSFORMED:
+## (Intercept)	0.0439992	0.2694845	61	0.1632719	0.8708
+## TreatmentHot	-0.0675129	0.4248725	33	-0.1589015	0.8747
+## SexM	0.2281912	0.3879908	33	0.5881356	0.5604
+## TreatmentHot:SexM	-0.5871091	0.6340908	33	-0.9259069	0.3612
+Anova(model.hsp60.field)
+##TRANSFORMED:
+## Treatment     1.1490  1     0.2837
+## Sex           0.0008  1     0.9778
+## Treatment:Sex 0.8938  1     0.3445
+#Should the interaction term be included?
+model.hsp60.field.noint=lme(HSP60_field_norm_trans~Treatment+Sex,data=HSP60_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.hsp60.field.noint)
+anova(model.hsp60.field,model.hsp60.field.noint)
+##TRANSFORMED:
+## model.hsp60.field	1	6	215.1811	230.6909	-101.5905			
+## model.hsp60.field.noint	2	5	214.0643	226.9892	-102.0322	1 vs 2	0.8832317	0.3473
+#Interaction needs to be removed
+#Should Sex be included?
+model.hsp60.field.trt=lme(HSP60_field_norm_trans~Treatment,data=HSP60_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.hsp60.field.trt)
+anova(model.hsp60.field.noint,model.hsp60.field.trt)
+##TRANSFORMED:
+## model.hsp60.field.noint	1	5	214.0643	226.9892	-102.0322			
+## model.hsp60.field.trt	2	4	212.0651	222.4050	-102.0326	1 vs 2	0.0007782473	0.9777
+#FINAL model: just Treatment
+model.hsp60.field.trt=lme(HSP60_field_norm_trans~Treatment,data=HSP60_field_norm,random=~1|BirdID,na.action=na.exclude)
+summary(model.hsp60.field.trt)
+##TRANSFORMED:
+## (Intercept)	0.1542234	0.1975609	61	0.7806371	0.4380
+## TreatmentHot	-0.3311690	0.3209625	35	-1.0317996	0.3092
+
+#APTX
+model.aptx.field=lme(APTX_field_norm_trans~Treatment+Sex+Treatment:Sex,data=APTX_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.aptx.field)
+##TRANSFORMED:
+## (Intercept)	-0.1860997	0.2411239	62	-0.7718010	0.4432
+## TreatmentHot	-0.6641384	0.3682943	34	-1.8032819	0.0802
+## SexM	0.9652370	0.3476110	34	2.7767734	0.0089
+## TreatmentHot:SexM	-0.2838866	0.5595701	34	-0.5073298	0.6152
+Anova(model.aptx.field)
+##TRANSFORMED:
+## Treatment      8.3942  1   0.003764 **
+## Sex           10.2786  1   0.001346 **
+## Treatment:Sex  0.2681  1   0.604604   
+#Should the interaction term be included in the model?
+model.aptx.field.noint=lme(APTX_field_norm_trans~Treatment+Sex,data=APTX_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.aptx.field.noint)
+anova(model.aptx.field,model.aptx.field.noint)
+##TRANSFORMED:
+## model.aptx.field	1	6	139.3093	154.9403	-63.65464			
+## model.aptx.field.noint	2	5	137.5765	150.6023	-63.78823	1 vs 2	0.2671781	0.6052
+#Interaction term should be removed from the model
+#Should Sex be included?
+model.aptx.field.trt=lme(APTX_field_norm_trans~Treatment,data=APTX_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.aptx.field.trt)
+anova(model.aptx.field.noint,model.aptx.field.trt)
+##TRANSFORMED:
+## model.aptx.field.noint	1	5	137.5765	150.6023	-63.78823			
+## model.aptx.field.trt	2	4	144.6331	155.0538	-68.31656	1 vs 2	9.056651	0.0026
+#FINAL model (transformed): Treatment+Sex
+model.aptx.field.noint=lme(APTX_field_norm_trans~Treatment+Sex,data=APTX_field_norm,random=~1|BirdID,na.action=na.exclude)
+summary(model.aptx.field.noint)
+##TRANSFORMED:
+## (Intercept)	-0.1337576	0.2229272	62	-0.6000055	0.5507
+## TreatmentHot	-0.7871047	0.2841242	35	-2.7702840	0.0089
+## SexM	0.8561391	0.2791452	35	3.0670023	0.0042
+```
+
+####Field samples, CoV
+```{r}
+#HSP90B1
+model.hsp90b1.field3=lme(HSP90B1_field_norm_trans~CoV+Sex+CoV:Sex,data=HSP90B1_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.hsp90b1.field3)
+##TRANSFORMED:
+## (Intercept)	-0.669692	1.28411	34	-0.5215210	0.6054
+## CoV	13.456465	26.77531	23	0.5025699	0.6200
+## SexM	1.507907	1.96226	23	0.7684537	0.4500
+## CoV:SexM	-26.841826	36.94525	23	-0.7265299	0.4748
+Anova(model.hsp90b1.field3)
+##TRANSFORMED:
+## CoV     0.0013  1     0.9713
+## Sex     0.0789  1     0.7788
+## CoV:Sex 0.5649  1     0.4523
+#Should the interaction term be included?
+model.hsp90b1.field.noint3=lme(HSP90B1_field_norm_trans~CoV+Sex,data=HSP90B1_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.hsp90b1.field.noint3)
+anova(model.hsp90b1.field3,model.hsp90b1.field.noint3)
+##TRANSFORMED:
+## model.hsp90b1.field3	1	6	129.6052	142.2704	-58.80259			
+## model.hsp90b1.field.noint3	2	5	128.1646	138.7189	-59.08228	1 vs 2	0.5593776	0.4545
+#Interaction term should be removed from the model
+#Should Sex be included?
+model.hsp90b1.field.trt3=lme(HSP90B1_field_norm_trans~CoV,data=HSP90B1_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.hsp90b1.field.trt3)
+anova(model.hsp90b1.field.noint3,model.hsp90b1.field.trt3)
+##TRANSFORMED:
+## model.hsp90b1.field.noint3	1	5	128.1646	138.7189	-59.08228			
+## model.hsp90b1.field.trt3	2	4	126.2418	134.6853	-59.12091	1 vs 2	0.0772584	0.781
+#FINAL model: just Treatment
+model.hsp90b1.field.trt3=lme(HSP90B1_field_norm_trans~CoV,data=HSP90B1_field_norm,random=~1|BirdID,na.action=na.exclude)
+summary(model.hsp90b1.field.trt3)
+##TRANSFORMED:
+## (Intercept)	-0.0667455	0.894195	34	-0.07464310	0.9409
+## CoV	1.5682677	16.817094	25	0.09325438	0.9264
+
+#IL1B
+model.il1b.field3=lme(IL1B_field_norm_trans~CoV+Sex+CoV:Sex,data=IL1B_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.il1b.field3)
+##TRANSFORMED:
+## (Intercept)	0.229805	0.925789	54	0.2482264	0.8049
+## CoV	-5.560392	18.110062	30	-0.3070333	0.7609
+## SexM	-1.370040	1.682359	30	-0.8143566	0.4219
+## CoV:SexM	26.318703	29.976866	30	0.8779672	0.3869
+Anova(model.il1b.field3)
+##TRANSFORMED:
+## CoV     0.0823  1     0.7742
+## Sex     0.0471  1     0.8282
+## CoV:Sex 0.8075  1     0.3689
+#Should the interaction be included?
+model.il1b.field.noint3=lme(IL1B_field_norm_trans~CoV+Sex,data=IL1B_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.il1b.field.noint3)
+anova(model.il1b.field3,model.il1b.field.noint3)
+##TRANSFORMED:
+## model.il1b.field3	1	6	173.1275	187.9915	-80.56373			
+## model.il1b.field.noint3	2	5	171.9259	184.3126	-80.96297	1 vs 2	0.7984795	0.3715
+#Interaction should not be included in the model.
+#Should Sex be included in the model?
+model.il1b.field.trt3=lme(IL1B_field_norm_trans~CoV,data=IL1B_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.il1b.field.trt3)
+anova(model.il1b.field.noint3,model.il1b.field.trt3)
+##TRANSFORMED:
+## model.il1b.field.noint3	1	5	171.9259	184.3126	-80.96297			
+## model.il1b.field.trt3	2	4	169.9719	179.8812	-80.98595	1 vs 2	0.04595578	0.8303
+#FINAL model: just Treatment
+model.il1b.field.trt3=lme(IL1B_field_norm_trans~CoV,data=IL1B_field_norm,random=~1|BirdID,na.action=na.exclude)
+summary(model.il1b.field.trt3)
+##TRANSFORMED:
+## (Intercept)	-0.268835	0.757963	54	-0.3546805	0.7242
+## CoV	5.120350	13.814044	32	0.3706626	0.7133
+
+#HSP90AA1
+model.hsp90aa1.field3=lme(HSP90AA1_field_norm_trans~CoV+Sex+CoV:Sex,data=HSP90AA1_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.hsp90aa1.field3)
+##TRANSFORMED:
+## (Intercept)	-0.61465	0.820992	52	-0.7486669	0.4574
+## CoV	16.54566	15.806794	34	1.0467439	0.3026
+## SexM	-2.14036	1.467835	34	-1.4581747	0.1540
+## CoV:SexM	27.59693	26.063416	34	1.0588378	0.2971
+Anova(model.hsp90aa1.field3)
+##TRANSFORMED:
+## CoV     4.7218  1    0.02978 *
+## Sex     4.3681  1    0.03662 *
+## CoV:Sex 1.1733  1    0.27873  
+#Should the interaction be included?
+model.hsp90aa1.field.noint3=lme(HSP90AA1_field_norm_trans~CoV+Sex,data=HSP90AA1_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.hsp90aa1.field.noint3)
+anova(model.hsp90aa1.field3,model.hsp90aa1.field.noint3)
+##TRANSFORMED:
+## model.hsp90aa1.field3	1	6	152.4200	167.4188	-70.20998			
+## model.hsp90aa1.field.noint3	2	5	151.5758	164.0749	-70.78791	1 vs 2	1.15586	0.2823
+#Interaction should not be included in the model.
+#Should Sex be included in the model?
+model.hsp90aa1.field.trt3=lme(HSP90AA1_field_norm_trans~CoV,data=HSP90AA1_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.hsp90aa1.field.trt3)
+anova(model.hsp90aa1.field.noint3,model.hsp90aa1.field.trt3)
+##TRANSFORMED:
+## model.hsp90aa1.field.noint3	1	5	151.5758	164.0749	-70.78791			
+## model.hsp90aa1.field.trt3	2	4	153.5800	163.5793	-72.79001	1 vs 2	4.004208	0.0454
+#FINAL model: Treatment+Sex
+model.hsp90aa1.field.noint3=lme(HSP90AA1_field_norm_trans~CoV+Sex,data=HSP90AA1_field_norm,random=~1|BirdID,na.action=na.exclude)
+summary(model.hsp90aa1.field.noint3)
+##TRANSFORMED:
+## (Intercept)	-1.128068	0.686189	52	-1.643962	0.1062
+## CoV	26.723658	12.992000	35	2.056932	0.0472
+## SexM	-0.618776	0.313626	35	-1.972974	0.0564
+
+#HSP60
+model.hsp60.field3=lme(HSP60_field_norm_trans~CoV+Sex+CoV:Sex,data=HSP60_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.hsp60.field3)
+##TRANSFORMED:
+## (Intercept)	-0.983097	0.865763	61	-1.1355274	0.2606
+## CoV	19.891667	16.716068	33	1.1899729	0.2425
+## SexM	0.008124	1.559830	33	0.0052082	0.9959
+## CoV:SexM	-2.135142	27.879428	33	-0.0765848	0.9394
+Anova(model.hsp60.field3)
+##TRANSFORMED:
+## CoV     2.1305  1     0.1444
+## Sex     0.1201  1     0.7290
+## CoV:Sex 0.0061  1     0.9377
+#Should the interaction term be included?
+model.hsp60.field.noint3=lme(HSP60_field_norm_trans~CoV+Sex,data=HSP60_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.hsp60.field.noint3)
+anova(model.hsp60.field3,model.hsp60.field.noint3)
+##TRANSFORMED:
+## model.hsp60.field3	1	6	215.0862	230.5960	-101.5431			
+## model.hsp60.field.noint3	2	5	213.0924	226.0172	-101.5462	1 vs 2	0.00611389	0.9377
+#Interaction term should be removed from the model
+#Should Sex be included?
+model.hsp60.field.trt3=lme(HSP60_field_norm_trans~CoV,data=HSP60_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.hsp60.field.trt3)
+anova(model.hsp60.field.noint3,model.hsp60.field.trt3)
+##TRANSFORMED:
+## model.hsp60.field.noint3	1	5	213.0924	226.0172	-101.5462			
+## model.hsp60.field.trt3	2	4	211.2122	221.5521	-101.6061	1 vs 2	0.1198353	0.7292
+#FINAL model: just Treatment
+model.hsp60.field.trt3=lme(HSP60_field_norm_trans~CoV,data=HSP60_field_norm,random=~1|BirdID,na.action=na.exclude)
+summary(model.hsp60.field.trt3)
+##TRANSFORMED:
+## (Intercept)	-0.924633	0.707248	61	-1.307367	0.196
+## CoV	17.816193	12.899773	35	1.381125	0.176
+
+#APTX
+model.aptx.field3=lme(APTX_field_norm_trans~CoV+Sex+CoV:Sex,data=APTX_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+Anova(model.aptx.field3)
+##TRANSFORMED:
+## CoV     0.3029  1   0.582087   
+## Sex     8.0082  1   0.004657 **
+## CoV:Sex 0.1831  1   0.668695   
+#Should the interaction term be included in the model?
+model.aptx.field.noint3=lme(APTX_field_norm_trans~CoV+Sex,data=APTX_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.aptx.field.noint3)
+anova(model.aptx.field3,model.aptx.field.noint3)
+##TRANSFORMED:
+## model.aptx.field3	1	6	146.6268	162.2578	-67.31339			
+## model.aptx.field.noint3	2	5	144.8095	157.8354	-67.40476	1 vs 2	0.1827323	0.669
+#interaction should be removed from the model
+#Should Sex be included?
+model.aptx.field.trt3=lme(APTX_field_norm_trans~CoV,data=APTX_field_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.aptx.field.trt3)
+anova(model.aptx.field.noint3,model.aptx.field.trt3)
+##TRANSFORMED:
+## model.aptx.field.noint3	1	5	144.8095	157.8354	-67.40476			
+## model.aptx.field.trt3	2	4	150.0576	160.4783	-71.02880	1 vs 2	7.248092	0.0071
+#FINAL model (transformed): CoV+Sex
+model.aptx.field.noint3=lme(APTX_field_norm_trans~CoV+Sex,data=APTX_field_norm,random=~1|BirdID,na.action=na.exclude)
+summary(model.aptx.field.noint3)
+##TRANSFORMED:
+## (Intercept)	-0.828530	0.707873	62	-1.1704508	0.2463
+## CoV	7.081472	13.448562	35	0.5265598	0.6018
+## SexM	0.867430	0.320008	35	2.7106502	0.0103
+```
+####Lab samples
+```{r}
+#HSP90B1
+model.hsp90b1.lab=lme(HSP90B1_lab_norm_trans~Treatment*Sex,data=HSP90B1_lab_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.hsp90b1.lab)
+##TRANSFORMED: 
+## (Intercept)	0.4962590	0.3797530	37	1.306794	0.1993
+## Treatment40_deg	-0.9307529	0.5144785	16	-1.809119	0.0893
+## SexM	-1.4510214	0.5708143	16	-2.542020	0.0218
+## Treatment40_deg:SexM	2.3578553	0.7684510	16	3.068322	0.0074
+Anova(model.hsp90b1.lab)
+##TRANSFORMED: 
+## Treatment      0.1171  1   0.732184   
+## Sex            0.1658  1   0.683913   
+## Treatment:Sex 10.1251  1   0.001463 **
+#Significant Sex:Treatment interaction; interaction should stay in model
+#FINAL model: Treatment+Sex+Treatment:Sex
+model.hsp90b1.lab=lme(HSP90B1_lab_norm_trans~Treatment*Sex,data=HSP90B1_lab_norm,random=~1|BirdID,na.action=na.exclude)
+summary(model.hsp90b1.lab)
+##TRANSFORMED:
+## (Intercept)	0.4962590	0.4096145	37	1.211527	0.2334
+## Treatment40_deg	-0.9316028	0.5548716	16	-1.678952	0.1126
+## SexM	-1.4516126	0.6154445	16	-2.358641	0.0314
+## Treatment40_deg:SexM	2.3592963	0.8286461	16	2.847170	0.0116
+Anova(model.hsp90b1.lab)
+##TRANSFORMED:
+## Treatment     0.0939  1   0.759319   
+## Sex           0.1328  1   0.715548   
+## Treatment:Sex 8.1064  1   0.004411 **
+#in males
+model.hsp90b1.lab.m=lme(HSP90B1_lab_norm_trans~Treatment,data=HSP90B1_lab_norm,subset=c(Sex=="M"),random=~1|BirdID,na.action=na.exclude)
+summary(model.hsp90b1.lab.m)
+## (Intercept)	-0.956198	0.5226836	16	-1.829401	0.0860
+## Treatment40_deg	1.428538	0.7006544	7	2.038862	0.0808
+#in females
+model.hsp90b1.lab.f=lme(HSP90B1_lab_norm_trans~Treatment,data=HSP90B1_lab_norm,subset=c(Sex=="F"),random=~1|BirdID,na.action=na.exclude)
+summary(model.hsp90b1.lab.f)
+##TRANSFORMED:
+## (Intercept)	0.4962590	0.3581526	21	1.385608	0.1804
+## Treatment40_deg	-0.9299941	0.4852635	9	-1.916472	0.0875
+
+#IL1B
+model.il1b.lab=lme(IL1B_lab_norm_trans~Treatment+Sex+Treatment:Sex,data=IL1B_lab_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.il1b.lab)
+##TRANSFORMED:
+## (Intercept)	0.3710684	0.3535180	49	1.0496452	0.2990
+## Treatment40_deg	-0.5899343	0.4842235	27	-1.2183100	0.2336
+## SexM	-0.1896885	0.4843974	27	-0.3915968	0.6984
+## Treatment40_deg:SexM	0.2349788	0.6739779	27	0.3486447	0.7301
+Anova(model.il1b.lab)
+##TRANSFORMED:
+## Treatment     2.0379  1     0.1534
+## Sex           0.0433  1     0.8352
+## Treatment:Sex 0.1280  1     0.7206
+#Should the interaction term be included?
+model.il1b.lab.noint=lme(IL1B_lab_norm_trans~Treatment+Sex,data=IL1B_lab_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.il1b.lab.noint)
+anova(model.il1b.lab,model.il1b.lab.noint)
+##TRANSFORMED:
+## model.il1b.lab	1	6	134.3706	148.6628	-61.18530			
+## model.il1b.lab.noint	2	5	132.4983	144.4084	-61.24915	1 vs 2	0.127698	0.7208
+#No interaction term should be included in the model
+#Should Sex be included in the model?
+model.il1b.lab.trt=lme(IL1B_lab_norm_trans~Treatment,data=IL1B_lab_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.il1b.lab.trt)
+anova(model.il1b.lab.noint,model.il1b.lab.trt)
+##TRANSFORMED:
+## model.il1b.lab.noint	1	5	132.4983	144.4084	-61.24915			
+## model.il1b.lab.trt	2	4	130.5414	140.0695	-61.27070	1 vs 2	0.04308932	0.8356
+#FINAL MODEL: Just Treatment
+model.il1b.lab.trt=lme(IL1B_lab_norm_trans~Treatment,data=IL1B_lab_norm,random=~1|BirdID,na.action=na.exclude)
+summary(model.il1b.lab.trt)
+##TRANSFORMED:
+## (Intercept)	0.270176	0.2441762	49	1.106480	0.2739
+## Treatment40_deg	-0.466340	0.3400752	29	-1.371285	0.1808
+
+#HSP90AA1
+model.hsp90aa1.lab=lme(HSP90AA1_lab_norm_trans~Treatment+Sex+Treatment:Sex,data=HSP90AA1_lab_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.hsp90aa1.lab)
+##TRANSFORMED:
+## (Intercept)	0.2045431	0.3511076	33	0.5825652	0.5641
+## Treatment40_deg	-0.3761710	0.4960137	25	-0.7583883	0.4553
+## SexM	-0.6942514	0.4960137	25	-1.3996616	0.1739
+## Treatment40_deg:SexM	1.0663932	0.6900892	25	1.5452977	0.1348
+Anova(model.hsp90aa1.lab)
+##TRANSFORMED:
+## Treatment     0.2745  1     0.6003
+## Sex           0.1846  1     0.6674
+## Treatment:Sex 2.5526  1     0.1101
+#Should the interaction term be included?
+model.hsp90aa1.lab.noint=lme(HSP90AA1_lab_norm_trans~Treatment+Sex,data=HSP90AA1_lab_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.hsp90aa1.lab.noint)
+anova(model.hsp90aa1.lab,model.hsp90aa1.lab.noint)
+##TRANSFORMED:
+## model.hsp90aa1.lab	1	6	118.9277	131.6905	-53.46387			
+## model.hsp90aa1.lab.noint	2	5	119.3728	130.0085	-54.68640	1 vs 2	2.44506	0.1179
+#Interaction term should be removed
+#Should Sex stay in the model?
+model.hsp90aa1.lab.trt=lme(HSP90AA1_lab_norm_trans~Treatment,data=HSP90AA1_lab_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.hsp90aa1.lab.trt)
+anova(model.hsp90aa1.lab.noint,model.hsp90aa1.lab.trt)
+##TRANSFORMED:
+## model.hsp90aa1.lab.noint	1	5	119.3728	130.0085	-54.68640			
+## model.hsp90aa1.lab.trt	2	4	117.5414	126.0499	-54.77068	1 vs 2	0.1685727	0.6814
+#FINAL model: just Treatment
+model.hsp90aa1.lab.trt=lme(HSP90AA1_lab_norm_trans~Treatment,data=HSP90AA1_lab_norm,random=~1|BirdID,na.action=na.exclude)
+summary(model.hsp90aa1.lab.trt)
+##TRANSFORMED:
+## (Intercept)	-0.1436447	0.2600566	33	-0.5523596	0.5844
+## Treatment40_deg	0.1703448	0.3614459	27	0.4712872	0.6412
+
+#HSP60
+model.hsp60.lab=lme(HSP60_lab_norm_trans~Treatment+Sex+Treatment:Sex,data=HSP60_lab_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.hsp60.lab)
+##TRANSFORMED: 
+## (Intercept)	0.20009557	0.07716536	62	2.5930751	0.0119
+## Treatment40_deg	0.03857927	0.10566302	27	0.3651161	0.7179
+## SexM	-0.09336854	0.10566302	27	-0.8836444	0.3847
+## Treatment40_deg:SexM	0.10118944	0.14691847	27	0.6887455	0.4969
+Anova(model.hsp60.lab)
+##TRANSFORMED:
+## Treatment     1.6026  1     0.2055
+## Sex           0.3264  1     0.5678
+## Treatment:Sex 0.4957  1     0.4814
+#Should the interaction term be included?
+model.hsp60.lab.noint=lme(HSP60_lab_norm_trans~Treatment+Sex,data=HSP60_lab_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.hsp60.lab.noint)
+anova(model.hsp60.lab,model.hsp60.lab.noint)
+##TRANSFORMED:
+## model.hsp60.lab	1	6	-270.4527	-255.2571	141.2263			
+## model.hsp60.lab.noint	2	5	-271.9609	-259.2979	140.9804	1 vs 2	0.4917691	0.4831
+#Interaction term should NOT be included in the model
+#Should Sex be included?
+model.hsp60.lab.trt=lme(HSP60_lab_norm_trans~Treatment,data=HSP60_lab_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.hsp60.lab.trt)
+anova(model.hsp60.lab.noint,model.hsp60.lab.trt)
+##TRANSFORMED:
+## model.hsp60.lab.noint	1	5	-271.9609	-259.2979	140.9804			
+## model.hsp60.lab.trt	2	4	-273.6413	-263.5109	140.8207	1 vs 2	0.3195748	0.5719
+#Sex should NOT be included
+#FINAL MODEL: Treatment
+model.hsp60.lab.trt=lme(HSP60_lab_norm_trans~Treatment,data=HSP60_lab_norm,random=~1|BirdID,na.action=na.exclude)
+summary(model.hsp60.lab.trt)
+##TRANSFORMED:
+## (Intercept)	0.15029901	0.05401873	62	2.78235	0.0071
+## Treatment40_deg	0.09228627	0.07519090	29	1.22736	0.2296
+
+#APTX
+model.aptx.lab=lme(APTX_lab_norm_trans~Treatment*Sex,data=APTX_lab_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.aptx.lab)
+##TRANSFORMED:
+## (Intercept)	1.0951476	0.1554818	62	7.043574	0.0000
+## Treatment40_deg	-0.0152090	0.2129022	27	-0.071437	0.9436
+## SexM	0.2832738	0.2129022	27	1.330535	0.1945
+## Treatment40_deg:SexM	0.0983682	0.2960285	27	0.332293	0.7422
+Anova(model.aptx.lab)
+##TRANSFORMED:
+## Treatment     0.0608  1    0.80529  
+## Sex           5.3321  1    0.02094 *
+## Treatment:Sex 0.1154  1    0.73410  
+#Should the interaction term be included?
+model.aptx.lab.noint=lme(APTX_lab_norm_trans~Treatment+Sex,data=APTX_lab_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.aptx.lab.noint)
+anova(model.aptx.lab,model.aptx.lab.noint)
+##TRANSFORMED:
+## model.aptx.lab	1	6	-118.5109	-103.3153	65.25547			
+## model.aptx.lab.noint	2	5	-120.3958	-107.7328	65.19788	1 vs 2	0.1151671	0.7343
+#Interaction term should be removed
+#Should Sex be included?
+model.aptx.lab.trt=lme(APTX_lab_norm_trans~Treatment,data=APTX_lab_norm,random=~1|BirdID,method="ML",na.action=na.exclude)
+summary(model.aptx.lab.trt)
+anova(model.aptx.lab.noint,model.aptx.lab.trt)
+##TRANSFORMED:
+## model.aptx.lab.noint	1	5	-120.3958	-107.7328	65.19788			
+## model.aptx.lab.trt	2	4	-117.4925	-107.3621	62.74626	1 vs 2	4.903244	0.0268
+#FINAL model (transformed): Treatment+Sex
+model.aptx.lab.noint=lme(APTX_lab_norm_trans~Treatment+Sex,data=APTX_lab_norm,random=~1|BirdID,na.action=na.exclude)
+summary(model.aptx.lab.noint)
+##TRANSFORMED:
+## (Intercept)	1.0680115	0.1364433	62	7.827510	0.0000
+## Treatment40_deg	0.0356711	0.1525483	28	0.233835	0.8168
+## SexM	0.3341539	0.1525483	28	2.190480	0.0370
+```
